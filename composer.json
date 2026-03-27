@@ -6,7 +6,8 @@
     "license": "MIT",
     "autoload": {
         "psr-4": {
-            "CTG\\ApiServer\\": "src/"
+            "CTG\\ApiServer\\": "src/",
+            "CTG\\Test\\": "lib/ctg-php-test/src/"
         }
     },
     "require": {

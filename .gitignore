@@ -1,0 +1,5 @@
+vendor/
+lib/
+staging/
+composer.lock
+.claude/
