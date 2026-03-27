@@ -225,7 +225,7 @@ class CTGEndpoint
             if ($token === null || $token === '') {
                 $this->_sendStatus(401);
                 $this->_sendHeader('Content-Type', 'application/json; charset=utf-8');
-                $this->_sendBody(json_encode([
+                $this->_sendBody($this->_safeJsonEncode([
                     'success' => false,
                     'result'  => 'Authorization token required',
                 ]));
@@ -237,7 +237,7 @@ class CTGEndpoint
             } catch (\Throwable $e) {
                 $this->_sendStatus(401);
                 $this->_sendHeader('Content-Type', 'application/json; charset=utf-8');
-                $this->_sendBody(json_encode([
+                $this->_sendBody($this->_safeJsonEncode([
                     'success' => false,
                     'result'  => 'Authorization token required',
                 ]));
@@ -280,7 +280,7 @@ class CTGEndpoint
         if (count($errors) > 0) {
             $this->_sendStatus(400);
             $this->_sendHeader('Content-Type', 'application/json; charset=utf-8');
-            $this->_sendBody(json_encode([
+            $this->_sendBody($this->_safeJsonEncode([
                 'success' => false,
                 'result'  => $errors,
             ]));
@@ -471,11 +471,21 @@ class CTGEndpoint
     {
         $this->_sendStatus($error->httpStatus);
         $this->_sendHeader('Content-Type', 'application/json; charset=utf-8');
-        $encoded = json_encode([
+        $this->_sendBody($this->_safeJsonEncode([
             'success' => false,
             'result'  => $error->toResult($this->_exposeErrorDetails),
-        ]);
-        $this->_sendBody($encoded !== false ? $encoded : '{"success":false,"result":{"type":"INTERNAL_ERROR","message":"Response encoding failed"}}');
+        ]));
+    }
+
+    // :: MIXED -> STRING
+    // JSON-encode with fallback for encoding failures
+    private function _safeJsonEncode(mixed $data): string
+    {
+        $encoded = json_encode($data);
+        if ($encoded === false) {
+            return '{"success":false,"result":{"type":"INTERNAL_ERROR","message":"Response encoding failed"}}';
+        }
+        return $encoded;
     }
 
     // ── Static Methods ────────────────────────────────────────

@@ -63,10 +63,7 @@ class CTGResponse
     {
         $encoded = json_encode(['success' => true, 'result' => $data]);
         if ($encoded === false) {
-            $encoded = json_encode(['success' => false, 'result' => [
-                'type' => 'INTERNAL_ERROR',
-                'message' => 'Response encoding failed: ' . json_last_error_msg()
-            ]]);
+            $encoded = '{"success":false,"result":{"type":"INTERNAL_ERROR","message":"Response encoding failed"}}';
             $status = 500;
         }
         return new static($status, $encoded, $headers);
