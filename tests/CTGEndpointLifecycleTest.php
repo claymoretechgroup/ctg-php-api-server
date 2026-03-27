@@ -68,6 +68,11 @@ class TestEndpoint extends CTGEndpoint {
     protected function _getHeaders(): array { return $this->_testHeaders; }
     protected function _getQuery(): array { return $this->_testQuery; }
     protected function _getRawBody(): string { return $this->_testBody; }
+    protected function _getContentLength(): ?int { return $this->_testBody !== '' ? strlen($this->_testBody) : null; }
+    protected function _readBodyWithLimit(int $limit): string|false {
+        if (strlen($this->_testBody) > $limit) { return false; }
+        return $this->_testBody;
+    }
     protected function _getContentType(): string { return $this->_testContentType; }
     protected function _sendStatus(int $code): void { $this->_capturedStatus = $code; }
     protected function _sendHeader(string $name, string $value): void { $this->_capturedHeaders[$name] = $value; }

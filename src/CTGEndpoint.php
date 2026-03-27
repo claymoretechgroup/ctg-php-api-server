@@ -41,7 +41,7 @@ class CTGEndpoint
             throw new \RuntimeException('CTGEndpoint: cors config required');
         }
 
-        $this->_maxBodySize = $config['max_body_size'] ?? 0;
+        $this->_maxBodySize = max(0, (int)($config['max_body_size'] ?? 0));
         $this->_exposeErrorDetails = $config['expose_error_details'] ?? false;
     }
 
@@ -141,11 +141,20 @@ class CTGEndpoint
             return;
         }
 
-        // ── Step 3: Body Size Check ───────────────────────────
+        // ── Step 3: Body Size Check + Read ───────────────────
         $rawBody = '';
         if ($this->_maxBodySize > 0) {
-            $rawBody = $this->_getRawBody();
-            if (strlen($rawBody) > $this->_maxBodySize) {
+            // Check Content-Length first for early rejection without reading
+            $contentLength = $this->_getContentLength();
+            if ($contentLength !== null && $contentLength > $this->_maxBodySize) {
+                $this->_sendError(
+                    new CTGServerError('PAYLOAD_TOO_LARGE', 'Request body exceeds maximum size', 413)
+                );
+                return;
+            }
+            // Read incrementally, reject if accumulated size exceeds limit
+            $rawBody = $this->_readBodyWithLimit($this->_maxBodySize);
+            if ($rawBody === false) {
                 $this->_sendError(
                     new CTGServerError('PAYLOAD_TOO_LARGE', 'Request body exceeds maximum size', 413)
                 );
@@ -328,6 +337,16 @@ class CTGEndpoint
                 $headers[$name] = $value;
             }
         }
+        // Apache/FastCGI fallback: Authorization header may be stripped from HTTP_*
+        if (!isset($headers['authorization']) && function_exists('apache_request_headers')) {
+            $apacheHeaders = apache_request_headers();
+            foreach ($apacheHeaders as $name => $value) {
+                if (strtolower($name) === 'authorization') {
+                    $headers['authorization'] = $value;
+                    break;
+                }
+            }
+        }
         return $headers;
     }
 
@@ -341,6 +360,38 @@ class CTGEndpoint
     protected function _getRawBody(): string
     {
         return file_get_contents('php://input') ?: '';
+    }
+
+    // :: VOID -> ?INT
+    protected function _getContentLength(): ?int
+    {
+        $cl = $_SERVER['CONTENT_LENGTH'] ?? null;
+        return $cl !== null ? (int)$cl : null;
+    }
+
+    // :: INT -> STRING|FALSE
+    // Read body incrementally, return false if limit exceeded
+    protected function _readBodyWithLimit(int $limit): string|false
+    {
+        $stream = fopen('php://input', 'r');
+        if ($stream === false) {
+            return '';
+        }
+        $body = '';
+        $chunkSize = 8192;
+        while (!feof($stream)) {
+            $chunk = fread($stream, $chunkSize);
+            if ($chunk === false) {
+                break;
+            }
+            $body .= $chunk;
+            if (strlen($body) > $limit) {
+                fclose($stream);
+                return false;
+            }
+        }
+        fclose($stream);
+        return $body;
     }
 
     // :: VOID -> STRING
@@ -420,10 +471,11 @@ class CTGEndpoint
     {
         $this->_sendStatus($error->httpStatus);
         $this->_sendHeader('Content-Type', 'application/json; charset=utf-8');
-        $this->_sendBody(json_encode([
+        $encoded = json_encode([
             'success' => false,
             'result'  => $error->toResult($this->_exposeErrorDetails),
-        ]));
+        ]);
+        $this->_sendBody($encoded !== false ? $encoded : '{"success":false,"result":{"type":"INTERNAL_ERROR","message":"Response encoding failed"}}');
     }
 
     // ── Static Methods ────────────────────────────────────────

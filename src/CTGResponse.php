@@ -61,8 +61,15 @@ class CTGResponse
     // :: MIXED, INT, ARRAY -> ctgResponse
     public static function json(mixed $data, int $status = 200, array $headers = []): static
     {
-        $body = json_encode(['success' => true, 'result' => $data]);
-        return new static($status, $body, $headers);
+        $encoded = json_encode(['success' => true, 'result' => $data]);
+        if ($encoded === false) {
+            $encoded = json_encode(['success' => false, 'result' => [
+                'type' => 'INTERNAL_ERROR',
+                'message' => 'Response encoding failed: ' . json_last_error_msg()
+            ]]);
+            $status = 500;
+        }
+        return new static($status, $encoded, $headers);
     }
 
     // :: ARRAY -> ctgResponse
