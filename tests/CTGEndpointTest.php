@@ -249,6 +249,5 @@ CTGTest::init('onAuth — returns self for chaining')
     ->assert('is CTGEndpoint', fn($e) => $e instanceof CTGEndpoint, true)
     ->start(null, $config);
 
-// Note: auth misconfiguration (method with auth:true but no onAuth)
-// manifests at run time, not declaration time. This will be tested
-// in integration tests when run() is available.
+// Auth misconfiguration (auth:true without onAuth) is tested in
+// CTGEndpointLifecycleTest.php as a runtime behavior.

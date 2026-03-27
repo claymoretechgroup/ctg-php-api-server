@@ -269,6 +269,22 @@ CTGTest::init('body parse — GET with empty body produces empty body map')
     ->assert('params is null (no params declared)', fn($p) => $p, null)
     ->start(null, $config);
 
+CTGTest::init('body parse — Content-Type with charset parameter is accepted')
+    ->stage('execute', function($_) {
+        $captured = null;
+        $ep = makeEndpoint();
+        $ep->POST(function(CTGRequest $req) use (&$captured) {
+            $captured = $req->params();
+            return CTGResponse::json(['ok' => true]);
+        })
+        ->requiredBodyParam('name', CTGValidator::string());
+        $ep->withRequest('POST', [], [], '{"name":"Alice"}', 'application/json; charset=utf-8');
+        $ep->run();
+        return $captured;
+    })
+    ->assert('name is Alice', fn($p) => $p['name'] ?? null, 'Alice')
+    ->start(null, $config);
+
 // ═══════════════════════════════════════════════════════════════
 // STEP 5 — METHOD MATCH
 // ═══════════════════════════════════════════════════════════════
@@ -376,6 +392,53 @@ CTGTest::init('auth — POST with auth, empty token after trim returns 401')
         return runAndCapture($ep);
     })
     ->assert('status is 401', fn($r) => $r['status'], 401)
+    ->start(null, $config);
+
+CTGTest::init('auth — case-insensitive Bearer prefix accepted')
+    ->stage('execute', function($_) {
+        $captured = null;
+        $ep = makeEndpoint();
+        $ep->onAuth(fn(string $token) => ['sub' => 'user1']);
+        $ep->POST(function(CTGRequest $req) use (&$captured) {
+            $captured = $req->claims();
+            return CTGResponse::json(['ok' => true]);
+        }, ['auth' => true]);
+        $ep->withRequest('POST', ['authorization' => 'bearer my-token'], [], '', '');
+        $ep->run();
+        return $captured;
+    })
+    ->assert('claims has sub', fn($c) => $c['sub'] ?? null, 'user1')
+    ->start(null, $config);
+
+CTGTest::init('auth — BEARER uppercase prefix accepted')
+    ->stage('execute', function($_) {
+        $captured = null;
+        $ep = makeEndpoint();
+        $ep->onAuth(fn(string $token) => ['sub' => 'user2']);
+        $ep->POST(function(CTGRequest $req) use (&$captured) {
+            $captured = $req->claims();
+            return CTGResponse::json(['ok' => true]);
+        }, ['auth' => true]);
+        $ep->withRequest('POST', ['authorization' => 'BEARER my-token'], [], '', '');
+        $ep->run();
+        return $captured;
+    })
+    ->assert('claims has sub', fn($c) => $c['sub'] ?? null, 'user2')
+    ->start(null, $config);
+
+CTGTest::init('auth — auth:true without onAuth throws developer error')
+    ->stage('execute', function($_) {
+        try {
+            $ep = makeEndpoint();
+            $ep->POST(fn(CTGRequest $req) => CTGResponse::json([]), ['auth' => true]);
+            $ep->withRequest('POST', ['authorization' => 'Bearer token'], [], '', '');
+            $ep->run();
+            return 'no exception';
+        } catch (\Throwable $e) {
+            return 'threw: ' . get_class($e);
+        }
+    })
+    ->assert('throws', fn($r) => str_contains($r, 'threw'), true)
     ->start(null, $config);
 
 // ═══════════════════════════════════════════════════════════════
