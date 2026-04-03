@@ -3,3 +3,4 @@ lib/
 staging/
 composer.lock
 .claude/
+.codex/
