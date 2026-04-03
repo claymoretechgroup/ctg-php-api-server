@@ -25,6 +25,18 @@ response envelope. No framework, no middleware stack, no router.
 
 ## Install
 
+Add the GitHub repository to your `composer.json`:
+
+```json
+{
+    "repositories": [
+        { "type": "vcs", "url": "https://github.com/claymoretechgroup/ctg-php-api-server" }
+    ]
+}
+```
+
+Then require the package:
+
 ```
 composer require ctg/php-api-server
 ```
