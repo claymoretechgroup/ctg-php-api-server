@@ -25,9 +25,10 @@ class CTGValidationError extends \Exception
         string $message = '',
         mixed $context = null
     ) {
+        $intCode = self::TYPES[$code]
+            ?? throw new \InvalidArgumentException("Unknown CTGValidationError code: {$code}");
         $this->_errorCode = $code;
         $this->_context = $context;
-        $intCode = self::TYPES[$code] ?? 0;
         parent::__construct($message, $intCode);
     }
 

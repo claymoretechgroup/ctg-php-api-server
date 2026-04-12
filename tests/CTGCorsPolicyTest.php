@@ -1,130 +1,118 @@
 <?php
 declare(strict_types=1);
 
-require_once __DIR__ . '/../vendor/autoload.php';
 
 use CTG\Test\CTGTest;
+use CTG\Test\CTGTestState;
+use CTG\Test\Predicates\CTGTestPredicates;
 use CTG\ApiServer\CTGCorsPolicy;
+
+$pipelines = [];
 
 // Tests for CTGCorsPolicy — construction, building, validation, export
 // Note: resolve() tests are deferred — they require HTTP context (header() calls)
 
-$config = ['output' => 'console'];
 
 // ═══════════════════════════════════════════════════════════════
 // CONSTRUCTION AND BUILDING
 // ═══════════════════════════════════════════════════════════════
 
-CTGTest::init('init — creates empty policy')
-    ->stage('create', fn($_) => CTGCorsPolicy::init())
-    ->assert('is CTGCorsPolicy', fn($p) => $p instanceof CTGCorsPolicy, true)
-    ->start(null, $config);
+$pipelines[] = CTGTest::init('init — creates empty policy')
+    ->stage('create', fn(CTGTestState $state) => CTGCorsPolicy::init())
+    ->assert('is CTGCorsPolicy', fn(CTGTestState $state) => $state->getSubject() instanceof CTGCorsPolicy, CTGTestPredicates::isTrue())
+    ;
 
-CTGTest::init('fluent chaining — returns self')
-    ->stage('create', fn($_) => CTGCorsPolicy::init()
+$pipelines[] = CTGTest::init('fluent chaining — returns self')
+    ->stage('create', fn(CTGTestState $state) => CTGCorsPolicy::init()
         ->origins('*')
         ->methods(['GET', 'POST'])
         ->headers(['Content-Type'])
         ->exposedHeaders(['X-Request-Id'])
         ->credentials(false)
         ->maxAge(3600))
-    ->assert('is CTGCorsPolicy', fn($p) => $p instanceof CTGCorsPolicy, true)
-    ->start(null, $config);
+    ->assert('is CTGCorsPolicy', fn(CTGTestState $state) => $state->getSubject() instanceof CTGCorsPolicy, CTGTestPredicates::isTrue())
+    ;
 
 // ═══════════════════════════════════════════════════════════════
 // VALIDATION RULES
 // ═══════════════════════════════════════════════════════════════
 
-CTGTest::init('validate — wildcard + credentials throws')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('validate — wildcard + credentials throws')
+    ->stage('execute', function(CTGTestState $state) {
         try {
             CTGCorsPolicy::init()
                 ->origins('*')
                 ->credentials(true)
                 ->validate();
             return 'no exception';
-        } catch (\Exception $e) {
-            return 'threw';
+        } catch (\RuntimeException $e) {
+            return $e->getMessage();
         }
     })
-    ->assert('throws', fn($r) => $r, 'threw')
-    ->start(null, $config);
+    ->assert('throws RuntimeException about wildcard+credentials', fn(CTGTestState $state) => $state->getSubject(), CTGTestPredicates::contains('wildcard origin cannot be used with credentials'))
+    ;
 
-CTGTest::init('validate — wildcard without credentials passes')
-    ->stage('execute', function($_) {
-        try {
-            CTGCorsPolicy::init()
-                ->origins('*')
-                ->methods(['GET'])
-                ->validate();
-            return 'passed';
-        } catch (\Exception $e) {
-            return 'threw';
-        }
-    })
-    ->assert('passes', fn($r) => $r, 'passed')
-    ->start(null, $config);
+$pipelines[] = CTGTest::init('validate — wildcard without credentials passes')
+    ->stage('execute', fn(CTGTestState $state) => CTGCorsPolicy::init()
+        ->origins('*')
+        ->methods(['GET'])
+        ->validate())
+    ->assert('returns policy', fn(CTGTestState $state) => $state->getSubject() instanceof CTGCorsPolicy, CTGTestPredicates::isTrue())
+    ;
 
-CTGTest::init('validate — specific origins + credentials passes')
-    ->stage('execute', function($_) {
-        try {
-            CTGCorsPolicy::init()
-                ->origins(['https://a.com'])
-                ->credentials(true)
-                ->validate();
-            return 'passed';
-        } catch (\Exception $e) {
-            return 'threw';
-        }
-    })
-    ->assert('passes', fn($r) => $r, 'passed')
-    ->start(null, $config);
+$pipelines[] = CTGTest::init('validate — specific origins + credentials passes')
+    ->stage('execute', fn(CTGTestState $state) => CTGCorsPolicy::init()
+        ->origins(['https://a.com'])
+        ->credentials(true)
+        ->validate())
+    ->assert('returns policy', fn(CTGTestState $state) => $state->getSubject() instanceof CTGCorsPolicy, CTGTestPredicates::isTrue())
+    ;
 
-CTGTest::init('validate — empty origins throws')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('validate — empty origins throws')
+    ->stage('execute', function(CTGTestState $state) {
         try {
             CTGCorsPolicy::init()
                 ->origins('')
                 ->validate();
             return 'no exception';
-        } catch (\Exception $e) {
-            return 'threw';
+        } catch (\RuntimeException $e) {
+            return $e->getMessage();
         }
     })
-    ->assert('throws', fn($r) => $r, 'threw')
-    ->start(null, $config);
+    ->assert('throws RuntimeException about empty origins', fn(CTGTestState $state) => $state->getSubject(), CTGTestPredicates::contains('origins must not be empty'))
+    ;
 
-CTGTest::init('validate — empty array origins throws')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('validate — empty array origins throws')
+    ->stage('execute', function(CTGTestState $state) {
         try {
             CTGCorsPolicy::init()
                 ->origins([])
                 ->validate();
             return 'no exception';
-        } catch (\Exception $e) {
-            return 'threw';
+        } catch (\RuntimeException $e) {
+            return $e->getMessage();
         }
     })
-    ->assert('throws', fn($r) => $r, 'threw')
-    ->start(null, $config);
+    ->assert('throws RuntimeException about empty origins', fn(CTGTestState $state) => $state->getSubject(), CTGTestPredicates::contains('origins must not be empty'))
+    ;
 
-CTGTest::init('validate — negative maxAge throws')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('validate — negative maxAge throws')
+    ->stage('execute', function(CTGTestState $state) {
         try {
             CTGCorsPolicy::init()
                 ->origins('*')
                 ->maxAge(-1)
                 ->validate();
             return 'no exception';
-        } catch (\Exception $e) {
-            return 'threw';
+        } catch (\RuntimeException $e) {
+            return $e->getMessage();
         }
     })
-    ->assert('throws', fn($r) => $r, 'threw')
-    ->start(null, $config);
+    ->assert('throws RuntimeException about negative maxAge', fn(CTGTestState $state) => $state->getSubject(), CTGTestPredicates::contains('maxAge must be non-negative'))
+    ;
 
-CTGTest::init('validate — zero maxAge passes')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('validate — zero maxAge passes')
+    ->stage('execute', function(CTGTestState $state) {
         try {
             CTGCorsPolicy::init()
                 ->origins('*')
@@ -135,45 +123,45 @@ CTGTest::init('validate — zero maxAge passes')
             return 'threw';
         }
     })
-    ->assert('passes', fn($r) => $r, 'passed')
-    ->start(null, $config);
+    ->assert('passes', fn(CTGTestState $state) => $state->getSubject(), CTGTestPredicates::equals('passed'))
+    ;
 
 // ═══════════════════════════════════════════════════════════════
 // EXPORT
 // ═══════════════════════════════════════════════════════════════
 
-CTGTest::init('export — returns array with origins key')
-    ->stage('execute', fn($_) => CTGCorsPolicy::init()
+$pipelines[] = CTGTest::init('export — returns array with origins key')
+    ->stage('execute', fn(CTGTestState $state) => CTGCorsPolicy::init()
         ->origins('*')
         ->export())
-    ->assert('is array', fn($r) => is_array($r), true)
-    ->assert('has origins key', fn($r) => array_key_exists('origins', $r), true)
-    ->start(null, $config);
+    ->assert('is array', fn(CTGTestState $state) => is_array($state->getSubject()), CTGTestPredicates::isTrue())
+    ->assert('has origins key', fn(CTGTestState $state) => array_key_exists('origins', $state->getSubject()), CTGTestPredicates::isTrue())
+    ;
 
-CTGTest::init('export — wildcard origin value')
-    ->stage('execute', fn($_) => CTGCorsPolicy::init()
+$pipelines[] = CTGTest::init('export — wildcard origin value')
+    ->stage('execute', fn(CTGTestState $state) => CTGCorsPolicy::init()
         ->origins('*')
         ->export())
-    ->assert('origins is *', fn($r) => $r['origins'], '*')
-    ->start(null, $config);
+    ->assert('origins is *', fn(CTGTestState $state) => $state->getSubject()['origins'], CTGTestPredicates::equals('*'))
+    ;
 
-CTGTest::init('export — array origins preserved')
-    ->stage('execute', fn($_) => CTGCorsPolicy::init()
+$pipelines[] = CTGTest::init('export — array origins preserved')
+    ->stage('execute', fn(CTGTestState $state) => CTGCorsPolicy::init()
         ->origins(['https://a.com', 'https://b.com'])
         ->export())
-    ->assert('origins list', fn($r) => $r['origins'], ['https://a.com', 'https://b.com'])
-    ->start(null, $config);
+    ->assert('origins list', fn(CTGTestState $state) => $state->getSubject()['origins'], CTGTestPredicates::equals(['https://a.com', 'https://b.com']))
+    ;
 
-CTGTest::init('export — includes methods')
-    ->stage('execute', fn($_) => CTGCorsPolicy::init()
+$pipelines[] = CTGTest::init('export — includes methods')
+    ->stage('execute', fn(CTGTestState $state) => CTGCorsPolicy::init()
         ->origins('*')
         ->methods(['GET', 'POST'])
         ->export())
-    ->assert('has methods', fn($r) => $r['methods'], ['GET', 'POST'])
-    ->start(null, $config);
+    ->assert('has methods', fn(CTGTestState $state) => $state->getSubject()['methods'], CTGTestPredicates::equals(['GET', 'POST']))
+    ;
 
-CTGTest::init('export — includes all configured fields')
-    ->stage('execute', fn($_) => CTGCorsPolicy::init()
+$pipelines[] = CTGTest::init('export — includes all configured fields')
+    ->stage('execute', fn(CTGTestState $state) => CTGCorsPolicy::init()
         ->origins(['https://a.com'])
         ->methods(['GET', 'POST'])
         ->headers(['Content-Type', 'Authorization'])
@@ -181,16 +169,16 @@ CTGTest::init('export — includes all configured fields')
         ->credentials(true)
         ->maxAge(3600)
         ->export())
-    ->assert('has origins', fn($r) => $r['origins'], ['https://a.com'])
-    ->assert('has methods', fn($r) => $r['methods'], ['GET', 'POST'])
-    ->assert('has headers', fn($r) => $r['headers'], ['Content-Type', 'Authorization'])
-    ->assert('has exposedHeaders', fn($r) => $r['exposedHeaders'], ['X-Request-Id'])
-    ->assert('has credentials', fn($r) => $r['credentials'], true)
-    ->assert('has maxAge', fn($r) => $r['maxAge'], 3600)
-    ->start(null, $config);
+    ->assert('has origins', fn(CTGTestState $state) => $state->getSubject()['origins'], CTGTestPredicates::equals(['https://a.com']))
+    ->assert('has methods', fn(CTGTestState $state) => $state->getSubject()['methods'], CTGTestPredicates::equals(['GET', 'POST']))
+    ->assert('has headers', fn(CTGTestState $state) => $state->getSubject()['headers'], CTGTestPredicates::equals(['Content-Type', 'Authorization']))
+    ->assert('has exposedHeaders', fn(CTGTestState $state) => $state->getSubject()['exposedHeaders'], CTGTestPredicates::equals(['X-Request-Id']))
+    ->assert('has credentials', fn(CTGTestState $state) => $state->getSubject()['credentials'], CTGTestPredicates::isTrue())
+    ->assert('has maxAge', fn(CTGTestState $state) => $state->getSubject()['maxAge'], CTGTestPredicates::equals(3600))
+    ;
 
-CTGTest::init('export — calls validate internally (wildcard + credentials throws)')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('export — calls validate internally (wildcard + credentials throws)')
+    ->stage('execute', function(CTGTestState $state) {
         try {
             CTGCorsPolicy::init()
                 ->origins('*')
@@ -201,8 +189,8 @@ CTGTest::init('export — calls validate internally (wildcard + credentials thro
             return 'threw';
         }
     })
-    ->assert('throws', fn($r) => $r, 'threw')
-    ->start(null, $config);
+    ->assert('throws', fn(CTGTestState $state) => $state->getSubject(), CTGTestPredicates::equals('threw'))
+    ;
 
 // ═══════════════════════════════════════════════════════════════
 // RESOLVE — DEFERRED
@@ -210,3 +198,5 @@ CTGTest::init('export — calls validate internally (wildcard + credentials thro
 
 // Note: resolve() tests require HTTP context ($_SERVER, header()).
 // These will be covered in integration tests.
+
+return $pipelines;

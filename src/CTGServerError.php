@@ -35,11 +35,12 @@ class CTGServerError extends \Exception
         int $httpStatus = 500,
         mixed $details = null
     ) {
+        $intCode = self::TYPES[$type]
+            ?? throw new \InvalidArgumentException("Unknown CTGServerError type: {$type}");
         $this->type = $type;
         $this->msg = $message;
         $this->httpStatus = $httpStatus;
         $this->details = $details;
-        $intCode = self::TYPES[$type] ?? 0;
         parent::__construct($message, $intCode);
     }
 

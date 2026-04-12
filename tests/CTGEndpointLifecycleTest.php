@@ -1,9 +1,10 @@
 <?php
 declare(strict_types=1);
 
-require_once __DIR__ . '/../vendor/autoload.php';
 
 use CTG\Test\CTGTest;
+use CTG\Test\CTGTestState;
+use CTG\Test\Predicates\CTGTestPredicates;
 use CTG\ApiServer\CTGEndpoint;
 use CTG\ApiServer\CTGCorsPolicy;
 use CTG\ApiServer\CTGValidator;
@@ -11,11 +12,12 @@ use CTG\ApiServer\CTGRequest;
 use CTG\ApiServer\CTGResponse;
 use CTG\ApiServer\CTGServerError;
 
+$pipelines = [];
+
 // Lifecycle/integration tests for CTGEndpoint::run()
 // Uses a testable subclass that overrides platform-specific I/O methods
 // so the 8-step lifecycle can be exercised without an HTTP server.
 
-$config = ['output' => 'console'];
 
 // ═══════════════════════════════════════════════════════════════
 // TESTABLE SUBCLASS
@@ -109,19 +111,19 @@ function runAndCapture(TestEndpoint $ep): array {
 // STEP 1 — CORS RESOLVE
 // ═══════════════════════════════════════════════════════════════
 
-CTGTest::init('CORS — wildcard origin sends Access-Control-Allow-Origin: *')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('CORS — wildcard origin sends Access-Control-Allow-Origin: *')
+    ->stage('execute', function(CTGTestState $state) {
         $ep = makeEndpoint();
         $ep->GET(fn(CTGRequest $req) => CTGResponse::json(['ok' => true]));
         $ep->withRequest('GET');
         $ep->run();
         return $ep->getCapturedHeaders();
     })
-    ->assert('has wildcard ACAO', fn($h) => $h['Access-Control-Allow-Origin'] ?? null, '*')
-    ->start(null, $config);
+    ->assert('has wildcard ACAO', fn(CTGTestState $state) => $state->getSubject()['Access-Control-Allow-Origin'] ?? null, CTGTestPredicates::equals('*'))
+    ;
 
-CTGTest::init('CORS — specific origin match sends origin + Vary')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('CORS — specific origin match sends origin + Vary')
+    ->stage('execute', function(CTGTestState $state) {
         $ep = TestEndpoint::init([
             'cors' => CTGCorsPolicy::init()
                 ->origins(['https://app.example.com', 'https://admin.example.com'])
@@ -133,80 +135,80 @@ CTGTest::init('CORS — specific origin match sends origin + Vary')
         $ep->run();
         return $ep->getCapturedHeaders();
     })
-    ->assert('has matching origin', fn($h) => $h['Access-Control-Allow-Origin'] ?? null, 'https://app.example.com')
-    ->assert('has Vary: Origin', fn($h) => $h['Vary'] ?? null, 'Origin')
-    ->start(null, $config);
+    ->assert('has matching origin', fn(CTGTestState $state) => $state->getSubject()['Access-Control-Allow-Origin'] ?? null, CTGTestPredicates::equals('https://app.example.com'))
+    ->assert('has Vary: Origin', fn(CTGTestState $state) => $state->getSubject()['Vary'] ?? null, CTGTestPredicates::equals('Origin'))
+    ;
 
 // ═══════════════════════════════════════════════════════════════
 // STEP 2 — OPTIONS PREFLIGHT
 // ═══════════════════════════════════════════════════════════════
 
-CTGTest::init('OPTIONS — responds 204 with no body')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('OPTIONS — responds 204 with no body')
+    ->stage('execute', function(CTGTestState $state) {
         $ep = makeEndpoint();
         $ep->GET(fn(CTGRequest $req) => CTGResponse::json(['ok' => true]));
         $ep->withRequest('OPTIONS');
         return runAndCapture($ep);
     })
-    ->assert('status is 204', fn($r) => $r['status'], 204)
-    ->assert('body is empty', fn($r) => $r['body'], '')
-    ->assert('has CORS header', fn($r) => isset($r['headers']['Access-Control-Allow-Origin']), true)
-    ->start(null, $config);
+    ->assert('status is 204', fn(CTGTestState $state) => $state->getSubject()['status'], CTGTestPredicates::equals(204))
+    ->assert('body is empty', fn(CTGTestState $state) => $state->getSubject()['body'], CTGTestPredicates::equals(''))
+    ->assert('has CORS header', fn(CTGTestState $state) => isset($state->getSubject()['headers']['Access-Control-Allow-Origin']), CTGTestPredicates::isTrue())
+    ;
 
-CTGTest::init('OPTIONS — auth-protected endpoint still returns 204 (no auth check)')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('OPTIONS — auth-protected endpoint still returns 204 (no auth check)')
+    ->stage('execute', function(CTGTestState $state) {
         $ep = makeEndpoint();
         $ep->onAuth(fn(string $token) => ['sub' => '123']);
         $ep->POST(fn(CTGRequest $req) => CTGResponse::json([]), ['auth' => true]);
         $ep->withRequest('OPTIONS');
         return runAndCapture($ep);
     })
-    ->assert('status is 204', fn($r) => $r['status'], 204)
-    ->start(null, $config);
+    ->assert('status is 204', fn(CTGTestState $state) => $state->getSubject()['status'], CTGTestPredicates::equals(204))
+    ;
 
 // ═══════════════════════════════════════════════════════════════
 // STEP 3 — BODY SIZE CHECK
 // ═══════════════════════════════════════════════════════════════
 
-CTGTest::init('body size — POST exceeding max_body_size returns 413')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('body size — POST exceeding max_body_size returns 413')
+    ->stage('execute', function(CTGTestState $state) {
         $ep = makeEndpoint(['max_body_size' => 10]);
         $ep->POST(fn(CTGRequest $req) => CTGResponse::json([]));
         $ep->withRequest('POST', [], [], str_repeat('x', 20), 'application/json');
         return runAndCapture($ep);
     })
-    ->assert('status is 413', fn($r) => $r['status'], 413)
-    ->assert('envelope success false', fn($r) => $r['json']['success'] ?? null, false)
-    ->assert('type is PAYLOAD_TOO_LARGE', fn($r) => $r['json']['result']['type'] ?? null, 'PAYLOAD_TOO_LARGE')
-    ->start(null, $config);
+    ->assert('status is 413', fn(CTGTestState $state) => $state->getSubject()['status'], CTGTestPredicates::equals(413))
+    ->assert('envelope success false', fn(CTGTestState $state) => $state->getSubject()['json']['success'] ?? null, CTGTestPredicates::isFalse())
+    ->assert('type is PAYLOAD_TOO_LARGE', fn(CTGTestState $state) => $state->getSubject()['json']['result']['type'] ?? null, CTGTestPredicates::equals('PAYLOAD_TOO_LARGE'))
+    ;
 
-CTGTest::init('body size — POST under max_body_size proceeds normally')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('body size — POST under max_body_size proceeds normally')
+    ->stage('execute', function(CTGTestState $state) {
         $ep = makeEndpoint(['max_body_size' => 100]);
         $ep->POST(fn(CTGRequest $req) => CTGResponse::json(['ok' => true]));
         $ep->withRequest('POST', [], [], '{"name":"hi"}', 'application/json');
         return runAndCapture($ep);
     })
-    ->assert('status is 200', fn($r) => $r['status'], 200)
-    ->assert('envelope success true', fn($r) => $r['json']['success'] ?? null, true)
-    ->start(null, $config);
+    ->assert('status is 200', fn(CTGTestState $state) => $state->getSubject()['status'], CTGTestPredicates::equals(200))
+    ->assert('envelope success true', fn(CTGTestState $state) => $state->getSubject()['json']['success'] ?? null, CTGTestPredicates::isTrue())
+    ;
 
-CTGTest::init('body size — GET with no body and max_body_size configured is fine')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('body size — GET with no body and max_body_size configured is fine')
+    ->stage('execute', function(CTGTestState $state) {
         $ep = makeEndpoint(['max_body_size' => 10]);
         $ep->GET(fn(CTGRequest $req) => CTGResponse::json(['ok' => true]));
         $ep->withRequest('GET');
         return runAndCapture($ep);
     })
-    ->assert('status is 200', fn($r) => $r['status'], 200)
-    ->start(null, $config);
+    ->assert('status is 200', fn(CTGTestState $state) => $state->getSubject()['status'], CTGTestPredicates::equals(200))
+    ;
 
 // ═══════════════════════════════════════════════════════════════
 // STEP 4 — BODY PARSE
 // ═══════════════════════════════════════════════════════════════
 
-CTGTest::init('body parse — valid JSON parsed and handler receives params')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('body parse — valid JSON parsed and handler receives params')
+    ->stage('execute', function(CTGTestState $state) {
         $captured = null;
         $ep = makeEndpoint();
         $ep->POST(function(CTGRequest $req) use (&$captured) {
@@ -218,22 +220,22 @@ CTGTest::init('body parse — valid JSON parsed and handler receives params')
         $ep->run();
         return $captured;
     })
-    ->assert('name is Alice', fn($p) => $p['name'] ?? null, 'Alice')
-    ->start(null, $config);
+    ->assert('name is Alice', fn(CTGTestState $state) => $state->getSubject()['name'] ?? null, CTGTestPredicates::equals('Alice'))
+    ;
 
-CTGTest::init('body parse — invalid JSON returns 400 INVALID_BODY')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('body parse — invalid JSON returns 400 INVALID_BODY')
+    ->stage('execute', function(CTGTestState $state) {
         $ep = makeEndpoint();
         $ep->POST(fn(CTGRequest $req) => CTGResponse::json([]));
         $ep->withRequest('POST', [], [], '{bad json', 'application/json');
         return runAndCapture($ep);
     })
-    ->assert('status is 400', fn($r) => $r['status'], 400)
-    ->assert('type is INVALID_BODY', fn($r) => $r['json']['result']['type'] ?? null, 'INVALID_BODY')
-    ->start(null, $config);
+    ->assert('status is 400', fn(CTGTestState $state) => $state->getSubject()['status'], CTGTestPredicates::equals(400))
+    ->assert('type is INVALID_BODY', fn(CTGTestState $state) => $state->getSubject()['json']['result']['type'] ?? null, CTGTestPredicates::equals('INVALID_BODY'))
+    ;
 
-CTGTest::init('body parse — form-urlencoded body is decoded')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('body parse — form-urlencoded body is decoded')
+    ->stage('execute', function(CTGTestState $state) {
         $captured = null;
         $ep = makeEndpoint();
         $ep->POST(function(CTGRequest $req) use (&$captured) {
@@ -245,22 +247,22 @@ CTGTest::init('body parse — form-urlencoded body is decoded')
         $ep->run();
         return $captured;
     })
-    ->assert('name is Bob', fn($p) => $p['name'] ?? null, 'Bob')
-    ->start(null, $config);
+    ->assert('name is Bob', fn(CTGTestState $state) => $state->getSubject()['name'] ?? null, CTGTestPredicates::equals('Bob'))
+    ;
 
-CTGTest::init('body parse — text/plain with non-empty body returns 400 INVALID_CONTENT_TYPE')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('body parse — text/plain with non-empty body returns 400 INVALID_CONTENT_TYPE')
+    ->stage('execute', function(CTGTestState $state) {
         $ep = makeEndpoint();
         $ep->POST(fn(CTGRequest $req) => CTGResponse::json([]));
         $ep->withRequest('POST', [], [], 'hello world', 'text/plain');
         return runAndCapture($ep);
     })
-    ->assert('status is 400', fn($r) => $r['status'], 400)
-    ->assert('type is INVALID_CONTENT_TYPE', fn($r) => $r['json']['result']['type'] ?? null, 'INVALID_CONTENT_TYPE')
-    ->start(null, $config);
+    ->assert('status is 400', fn(CTGTestState $state) => $state->getSubject()['status'], CTGTestPredicates::equals(400))
+    ->assert('type is INVALID_CONTENT_TYPE', fn(CTGTestState $state) => $state->getSubject()['json']['result']['type'] ?? null, CTGTestPredicates::equals('INVALID_CONTENT_TYPE'))
+    ;
 
-CTGTest::init('body parse — GET with empty body produces empty body map')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('body parse — GET with empty body produces empty body map')
+    ->stage('execute', function(CTGTestState $state) {
         $captured = null;
         $ep = makeEndpoint();
         $ep->GET(function(CTGRequest $req) use (&$captured) {
@@ -271,11 +273,11 @@ CTGTest::init('body parse — GET with empty body produces empty body map')
         $ep->run();
         return $captured;
     })
-    ->assert('params is null (no params declared)', fn($p) => $p, null)
-    ->start(null, $config);
+    ->assert('params is null (no params declared)', fn(CTGTestState $state) => $state->getSubject(), CTGTestPredicates::isNull())
+    ;
 
-CTGTest::init('body parse — Content-Type with charset parameter is accepted')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('body parse — Content-Type with charset parameter is accepted')
+    ->stage('execute', function(CTGTestState $state) {
         $captured = null;
         $ep = makeEndpoint();
         $ep->POST(function(CTGRequest $req) use (&$captured) {
@@ -287,53 +289,53 @@ CTGTest::init('body parse — Content-Type with charset parameter is accepted')
         $ep->run();
         return $captured;
     })
-    ->assert('name is Alice', fn($p) => $p['name'] ?? null, 'Alice')
-    ->start(null, $config);
+    ->assert('name is Alice', fn(CTGTestState $state) => $state->getSubject()['name'] ?? null, CTGTestPredicates::equals('Alice'))
+    ;
 
 // ═══════════════════════════════════════════════════════════════
 // STEP 5 — METHOD MATCH
 // ═══════════════════════════════════════════════════════════════
 
-CTGTest::init('method match — GET to POST-only endpoint returns 405')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('method match — GET to POST-only endpoint returns 405')
+    ->stage('execute', function(CTGTestState $state) {
         $ep = makeEndpoint();
         $ep->POST(fn(CTGRequest $req) => CTGResponse::json([]));
         $ep->withRequest('GET');
         return runAndCapture($ep);
     })
-    ->assert('status is 405', fn($r) => $r['status'], 405)
-    ->assert('type is METHOD_NOT_ALLOWED', fn($r) => $r['json']['result']['type'] ?? null, 'METHOD_NOT_ALLOWED')
-    ->assert('Allow header present', fn($r) => isset($r['headers']['Allow']), true)
-    ->start(null, $config);
+    ->assert('status is 405', fn(CTGTestState $state) => $state->getSubject()['status'], CTGTestPredicates::equals(405))
+    ->assert('type is METHOD_NOT_ALLOWED', fn(CTGTestState $state) => $state->getSubject()['json']['result']['type'] ?? null, CTGTestPredicates::equals('METHOD_NOT_ALLOWED'))
+    ->assert('Allow header present', fn(CTGTestState $state) => isset($state->getSubject()['headers']['Allow']), CTGTestPredicates::isTrue())
+    ;
 
-CTGTest::init('method match — POST to GET+POST endpoint executes handler')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('method match — POST to GET+POST endpoint executes handler')
+    ->stage('execute', function(CTGTestState $state) {
         $ep = makeEndpoint();
         $ep->GET(fn(CTGRequest $req) => CTGResponse::json(['method' => 'get']))
            ->POST(fn(CTGRequest $req) => CTGResponse::json(['method' => 'post']));
         $ep->withRequest('POST', [], [], '', '');
         return runAndCapture($ep);
     })
-    ->assert('status is 200', fn($r) => $r['status'], 200)
-    ->assert('handler executed', fn($r) => $r['json']['result']['method'] ?? null, 'post')
-    ->start(null, $config);
+    ->assert('status is 200', fn(CTGTestState $state) => $state->getSubject()['status'], CTGTestPredicates::equals(200))
+    ->assert('handler executed', fn(CTGTestState $state) => $state->getSubject()['json']['result']['method'] ?? null, CTGTestPredicates::equals('post'))
+    ;
 
-CTGTest::init('method match — HEAD request to endpoint with HEAD bound executes')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('method match — HEAD request to endpoint with HEAD bound executes')
+    ->stage('execute', function(CTGTestState $state) {
         $ep = makeEndpoint();
         $ep->HEAD(fn(CTGRequest $req) => CTGResponse::json(['method' => 'head']));
         $ep->withRequest('HEAD');
         return runAndCapture($ep);
     })
-    ->assert('status is 200', fn($r) => $r['status'], 200)
-    ->start(null, $config);
+    ->assert('status is 200', fn(CTGTestState $state) => $state->getSubject()['status'], CTGTestPredicates::equals(200))
+    ;
 
 // ═══════════════════════════════════════════════════════════════
 // STEP 6 — AUTH GATE
 // ═══════════════════════════════════════════════════════════════
 
-CTGTest::init('auth — GET without auth, POST with auth — GET succeeds without token')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('auth — GET without auth, POST with auth — GET succeeds without token')
+    ->stage('execute', function(CTGTestState $state) {
         $ep = makeEndpoint();
         $ep->onAuth(fn(string $token) => ['sub' => '123']);
         $ep->GET(fn(CTGRequest $req) => CTGResponse::json(['public' => true]))
@@ -341,12 +343,12 @@ CTGTest::init('auth — GET without auth, POST with auth — GET succeeds withou
         $ep->withRequest('GET');
         return runAndCapture($ep);
     })
-    ->assert('status is 200', fn($r) => $r['status'], 200)
-    ->assert('public data returned', fn($r) => $r['json']['result']['public'] ?? null, true)
-    ->start(null, $config);
+    ->assert('status is 200', fn(CTGTestState $state) => $state->getSubject()['status'], CTGTestPredicates::equals(200))
+    ->assert('public data returned', fn(CTGTestState $state) => $state->getSubject()['json']['result']['public'] ?? null, CTGTestPredicates::isTrue())
+    ;
 
-CTGTest::init('auth — POST with auth, valid token executes handler with claims')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('auth — POST with auth, valid token executes handler with claims')
+    ->stage('execute', function(CTGTestState $state) {
         $captured = null;
         $ep = makeEndpoint();
         $ep->onAuth(fn(string $token) => ['sub' => '42', 'role' => 'admin']);
@@ -358,24 +360,24 @@ CTGTest::init('auth — POST with auth, valid token executes handler with claims
         $ep->run();
         return $captured;
     })
-    ->assert('claims has sub', fn($c) => $c['sub'] ?? null, '42')
-    ->assert('claims has role', fn($c) => $c['role'] ?? null, 'admin')
-    ->start(null, $config);
+    ->assert('claims has sub', fn(CTGTestState $state) => $state->getSubject()['sub'] ?? null, CTGTestPredicates::equals('42'))
+    ->assert('claims has role', fn(CTGTestState $state) => $state->getSubject()['role'] ?? null, CTGTestPredicates::equals('admin'))
+    ;
 
-CTGTest::init('auth — POST with auth, missing Authorization header returns 401')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('auth — POST with auth, missing Authorization header returns 401')
+    ->stage('execute', function(CTGTestState $state) {
         $ep = makeEndpoint();
         $ep->onAuth(fn(string $token) => ['sub' => '123']);
         $ep->POST(fn(CTGRequest $req) => CTGResponse::json([]), ['auth' => true]);
         $ep->withRequest('POST', [], [], '', '');
         return runAndCapture($ep);
     })
-    ->assert('status is 401', fn($r) => $r['status'], 401)
-    ->assert('success is false', fn($r) => $r['json']['success'] ?? null, false)
-    ->start(null, $config);
+    ->assert('status is 401', fn(CTGTestState $state) => $state->getSubject()['status'], CTGTestPredicates::equals(401))
+    ->assert('success is false', fn(CTGTestState $state) => $state->getSubject()['json']['success'] ?? null, CTGTestPredicates::isFalse())
+    ;
 
-CTGTest::init('auth — POST with auth, invalid token (verifier throws) returns 401')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('auth — POST with auth, invalid token (verifier throws) returns 401')
+    ->stage('execute', function(CTGTestState $state) {
         $ep = makeEndpoint();
         $ep->onAuth(function(string $token) {
             throw new \RuntimeException('Invalid token');
@@ -384,23 +386,23 @@ CTGTest::init('auth — POST with auth, invalid token (verifier throws) returns 
         $ep->withRequest('POST', ['authorization' => 'Bearer bad-token'], [], '', '');
         return runAndCapture($ep);
     })
-    ->assert('status is 401', fn($r) => $r['status'], 401)
-    ->assert('success is false', fn($r) => $r['json']['success'] ?? null, false)
-    ->start(null, $config);
+    ->assert('status is 401', fn(CTGTestState $state) => $state->getSubject()['status'], CTGTestPredicates::equals(401))
+    ->assert('success is false', fn(CTGTestState $state) => $state->getSubject()['json']['success'] ?? null, CTGTestPredicates::isFalse())
+    ;
 
-CTGTest::init('auth — POST with auth, empty token after trim returns 401')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('auth — POST with auth, empty token after trim returns 401')
+    ->stage('execute', function(CTGTestState $state) {
         $ep = makeEndpoint();
         $ep->onAuth(fn(string $token) => ['sub' => '123']);
         $ep->POST(fn(CTGRequest $req) => CTGResponse::json([]), ['auth' => true]);
         $ep->withRequest('POST', ['authorization' => 'Bearer    '], [], '', '');
         return runAndCapture($ep);
     })
-    ->assert('status is 401', fn($r) => $r['status'], 401)
-    ->start(null, $config);
+    ->assert('status is 401', fn(CTGTestState $state) => $state->getSubject()['status'], CTGTestPredicates::equals(401))
+    ;
 
-CTGTest::init('auth — case-insensitive Bearer prefix accepted')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('auth — case-insensitive Bearer prefix accepted')
+    ->stage('execute', function(CTGTestState $state) {
         $captured = null;
         $ep = makeEndpoint();
         $ep->onAuth(fn(string $token) => ['sub' => 'user1']);
@@ -412,11 +414,11 @@ CTGTest::init('auth — case-insensitive Bearer prefix accepted')
         $ep->run();
         return $captured;
     })
-    ->assert('claims has sub', fn($c) => $c['sub'] ?? null, 'user1')
-    ->start(null, $config);
+    ->assert('claims has sub', fn(CTGTestState $state) => $state->getSubject()['sub'] ?? null, CTGTestPredicates::equals('user1'))
+    ;
 
-CTGTest::init('auth — BEARER uppercase prefix accepted')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('auth — BEARER uppercase prefix accepted')
+    ->stage('execute', function(CTGTestState $state) {
         $captured = null;
         $ep = makeEndpoint();
         $ep->onAuth(fn(string $token) => ['sub' => 'user2']);
@@ -428,11 +430,11 @@ CTGTest::init('auth — BEARER uppercase prefix accepted')
         $ep->run();
         return $captured;
     })
-    ->assert('claims has sub', fn($c) => $c['sub'] ?? null, 'user2')
-    ->start(null, $config);
+    ->assert('claims has sub', fn(CTGTestState $state) => $state->getSubject()['sub'] ?? null, CTGTestPredicates::equals('user2'))
+    ;
 
-CTGTest::init('auth — auth:true without onAuth throws developer error')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('auth — auth:true without onAuth throws developer error')
+    ->stage('execute', function(CTGTestState $state) {
         try {
             $ep = makeEndpoint();
             $ep->POST(fn(CTGRequest $req) => CTGResponse::json([]), ['auth' => true]);
@@ -443,15 +445,15 @@ CTGTest::init('auth — auth:true without onAuth throws developer error')
             return 'threw: ' . get_class($e);
         }
     })
-    ->assert('throws', fn($r) => str_contains($r, 'threw'), true)
-    ->start(null, $config);
+    ->assert('throws', fn(CTGTestState $state) => str_contains($state->getSubject(), 'threw'), CTGTestPredicates::isTrue())
+    ;
 
 // ═══════════════════════════════════════════════════════════════
 // STEP 7 — VALIDATE
 // ═══════════════════════════════════════════════════════════════
 
-CTGTest::init('validate — required param present and valid, handler receives value')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('validate — required param present and valid, handler receives value')
+    ->stage('execute', function(CTGTestState $state) {
         $captured = null;
         $ep = makeEndpoint();
         $ep->POST(function(CTGRequest $req) use (&$captured) {
@@ -463,24 +465,24 @@ CTGTest::init('validate — required param present and valid, handler receives v
         $ep->run();
         return $captured;
     })
-    ->assert('received Alice', fn($v) => $v, 'Alice')
-    ->start(null, $config);
+    ->assert('received Alice', fn(CTGTestState $state) => $state->getSubject(), CTGTestPredicates::equals('Alice'))
+    ;
 
-CTGTest::init('validate — required param missing returns 400 with "Required"')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('validate — required param missing returns 400 with "Required"')
+    ->stage('execute', function(CTGTestState $state) {
         $ep = makeEndpoint();
         $ep->POST(fn(CTGRequest $req) => CTGResponse::json([]))
            ->requiredBodyParam('name', CTGValidator::string());
         $ep->withRequest('POST', [], [], '{}', 'application/json');
         return runAndCapture($ep);
     })
-    ->assert('status is 400', fn($r) => $r['status'], 400)
-    ->assert('success is false', fn($r) => $r['json']['success'] ?? null, false)
-    ->assert('name error is Required', fn($r) => $r['json']['result']['name'] ?? null, 'Required')
-    ->start(null, $config);
+    ->assert('status is 400', fn(CTGTestState $state) => $state->getSubject()['status'], CTGTestPredicates::equals(400))
+    ->assert('success is false', fn(CTGTestState $state) => $state->getSubject()['json']['success'] ?? null, CTGTestPredicates::isFalse())
+    ->assert('name error is Required', fn(CTGTestState $state) => $state->getSubject()['json']['result']['name'] ?? null, CTGTestPredicates::equals('Required'))
+    ;
 
-CTGTest::init('validate — optional param missing with default, handler receives default')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('validate — optional param missing with default, handler receives default')
+    ->stage('execute', function(CTGTestState $state) {
         $captured = null;
         $ep = makeEndpoint();
         $ep->POST(function(CTGRequest $req) use (&$captured) {
@@ -492,11 +494,11 @@ CTGTest::init('validate — optional param missing with default, handler receive
         $ep->run();
         return $captured;
     })
-    ->assert('received default viewer', fn($v) => $v, 'viewer')
-    ->start(null, $config);
+    ->assert('received default viewer', fn(CTGTestState $state) => $state->getSubject(), CTGTestPredicates::equals('viewer'))
+    ;
 
-CTGTest::init('validate — optional param missing without default (PATCH), field absent')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('validate — optional param missing without default (PATCH), field absent')
+    ->stage('execute', function(CTGTestState $state) {
         $captured = null;
         $ep = makeEndpoint();
         $ep->PATCH(function(CTGRequest $req) use (&$captured) {
@@ -508,24 +510,24 @@ CTGTest::init('validate — optional param missing without default (PATCH), fiel
         $ep->run();
         return $captured;
     })
-    ->assert('name key absent', fn($p) => array_key_exists('name', $p ?? []), false)
-    ->start(null, $config);
+    ->assert('name key absent', fn(CTGTestState $state) => array_key_exists('name', $state->getSubject() ?? []), CTGTestPredicates::isFalse())
+    ;
 
-CTGTest::init('validate — param fails validation returns 400 with field error')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('validate — param fails validation returns 400 with field error')
+    ->stage('execute', function(CTGTestState $state) {
         $ep = makeEndpoint();
         $ep->POST(fn(CTGRequest $req) => CTGResponse::json([]))
            ->requiredBodyParam('email', CTGValidator::email());
         $ep->withRequest('POST', [], [], '{"email":"not-an-email"}', 'application/json');
         return runAndCapture($ep);
     })
-    ->assert('status is 400', fn($r) => $r['status'], 400)
-    ->assert('success is false', fn($r) => $r['json']['success'] ?? null, false)
-    ->assert('email field has error', fn($r) => isset($r['json']['result']['email']), true)
-    ->start(null, $config);
+    ->assert('status is 400', fn(CTGTestState $state) => $state->getSubject()['status'], CTGTestPredicates::equals(400))
+    ->assert('success is false', fn(CTGTestState $state) => $state->getSubject()['json']['success'] ?? null, CTGTestPredicates::isFalse())
+    ->assert('email field has error', fn(CTGTestState $state) => isset($state->getSubject()['json']['result']['email']), CTGTestPredicates::isTrue())
+    ;
 
-CTGTest::init('validate — multiple invalid params returns all field errors')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('validate — multiple invalid params returns all field errors')
+    ->stage('execute', function(CTGTestState $state) {
         $ep = makeEndpoint();
         $ep->POST(fn(CTGRequest $req) => CTGResponse::json([]))
            ->requiredBodyParam('name', CTGValidator::string())
@@ -533,13 +535,13 @@ CTGTest::init('validate — multiple invalid params returns all field errors')
         $ep->withRequest('POST', [], [], '{}', 'application/json');
         return runAndCapture($ep);
     })
-    ->assert('status is 400', fn($r) => $r['status'], 400)
-    ->assert('name error present', fn($r) => isset($r['json']['result']['name']), true)
-    ->assert('email error present', fn($r) => isset($r['json']['result']['email']), true)
-    ->start(null, $config);
+    ->assert('status is 400', fn(CTGTestState $state) => $state->getSubject()['status'], CTGTestPredicates::equals(400))
+    ->assert('name error present', fn(CTGTestState $state) => isset($state->getSubject()['json']['result']['name']), CTGTestPredicates::isTrue())
+    ->assert('email error present', fn(CTGTestState $state) => isset($state->getSubject()['json']['result']['email']), CTGTestPredicates::isTrue())
+    ;
 
-CTGTest::init('validate — undeclared body fields are stripped')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('validate — undeclared body fields are stripped')
+    ->stage('execute', function(CTGTestState $state) {
         $captured = null;
         $ep = makeEndpoint();
         $ep->POST(function(CTGRequest $req) use (&$captured) {
@@ -551,12 +553,12 @@ CTGTest::init('validate — undeclared body fields are stripped')
         $ep->run();
         return $captured;
     })
-    ->assert('name present', fn($p) => $p['name'] ?? null, 'Alice')
-    ->assert('extra stripped', fn($p) => array_key_exists('extra', $p ?? []), false)
-    ->start(null, $config);
+    ->assert('name present', fn(CTGTestState $state) => $state->getSubject()['name'] ?? null, CTGTestPredicates::equals('Alice'))
+    ->assert('extra stripped', fn(CTGTestState $state) => array_key_exists('extra', $state->getSubject() ?? []), CTGTestPredicates::isFalse())
+    ;
 
-CTGTest::init('validate — int query param from string is coerced to integer')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('validate — int query param from string is coerced to integer')
+    ->stage('execute', function(CTGTestState $state) {
         $captured = null;
         $ep = makeEndpoint();
         $ep->GET(function(CTGRequest $req) use (&$captured) {
@@ -568,60 +570,60 @@ CTGTest::init('validate — int query param from string is coerced to integer')
         $ep->run();
         return $captured;
     })
-    ->assert('received integer 5', fn($v) => $v, 5)
-    ->assert('type is int', fn($v) => is_int($v), true)
-    ->start(null, $config);
+    ->assert('received integer 5', fn(CTGTestState $state) => $state->getSubject(), CTGTestPredicates::equals(5))
+    ->assert('type is int', fn(CTGTestState $state) => is_int($state->getSubject()), CTGTestPredicates::isTrue())
+    ;
 
 // ═══════════════════════════════════════════════════════════════
 // STEP 8 — HANDLER
 // ═══════════════════════════════════════════════════════════════
 
-CTGTest::init('handler — Response::json wraps in success envelope')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('handler — Response::json wraps in success envelope')
+    ->stage('execute', function(CTGTestState $state) {
         $ep = makeEndpoint();
         $ep->GET(fn(CTGRequest $req) => CTGResponse::json(['id' => 1, 'name' => 'Alice']));
         $ep->withRequest('GET');
         return runAndCapture($ep);
     })
-    ->assert('status is 200', fn($r) => $r['status'], 200)
-    ->assert('success is true', fn($r) => $r['json']['success'] ?? null, true)
-    ->assert('result has data', fn($r) => $r['json']['result']['name'] ?? null, 'Alice')
-    ->start(null, $config);
+    ->assert('status is 200', fn(CTGTestState $state) => $state->getSubject()['status'], CTGTestPredicates::equals(200))
+    ->assert('success is true', fn(CTGTestState $state) => $state->getSubject()['json']['success'] ?? null, CTGTestPredicates::isTrue())
+    ->assert('result has data', fn(CTGTestState $state) => $state->getSubject()['json']['result']['name'] ?? null, CTGTestPredicates::equals('Alice'))
+    ;
 
-CTGTest::init('handler — Response::json with custom status')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('handler — Response::json with custom status')
+    ->stage('execute', function(CTGTestState $state) {
         $ep = makeEndpoint();
         $ep->POST(fn(CTGRequest $req) => CTGResponse::json(['id' => 99], 201));
         $ep->withRequest('POST', [], [], '', '');
         return runAndCapture($ep);
     })
-    ->assert('status is 201', fn($r) => $r['status'], 201)
-    ->assert('success is true', fn($r) => $r['json']['success'] ?? null, true)
-    ->start(null, $config);
+    ->assert('status is 201', fn(CTGTestState $state) => $state->getSubject()['status'], CTGTestPredicates::equals(201))
+    ->assert('success is true', fn(CTGTestState $state) => $state->getSubject()['json']['success'] ?? null, CTGTestPredicates::isTrue())
+    ;
 
-CTGTest::init('handler — Response::json with custom headers')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('handler — Response::json with custom headers')
+    ->stage('execute', function(CTGTestState $state) {
         $ep = makeEndpoint();
         $ep->POST(fn(CTGRequest $req) => CTGResponse::json(['id' => 99], 201, ['Location' => '/users/99']));
         $ep->withRequest('POST', [], [], '', '');
         return runAndCapture($ep);
     })
-    ->assert('Location header set', fn($r) => $r['headers']['Location'] ?? null, '/users/99')
-    ->start(null, $config);
+    ->assert('Location header set', fn(CTGTestState $state) => $state->getSubject()['headers']['Location'] ?? null, CTGTestPredicates::equals('/users/99'))
+    ;
 
-CTGTest::init('handler — Response::noContent returns 204 with no body')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('handler — Response::noContent returns 204 with no body')
+    ->stage('execute', function(CTGTestState $state) {
         $ep = makeEndpoint();
         $ep->DELETE(fn(CTGRequest $req) => CTGResponse::noContent());
         $ep->withRequest('DELETE');
         return runAndCapture($ep);
     })
-    ->assert('status is 204', fn($r) => $r['status'], 204)
-    ->assert('body is empty', fn($r) => $r['body'], '')
-    ->start(null, $config);
+    ->assert('status is 204', fn(CTGTestState $state) => $state->getSubject()['status'], CTGTestPredicates::equals(204))
+    ->assert('body is empty', fn(CTGTestState $state) => $state->getSubject()['body'], CTGTestPredicates::equals(''))
+    ;
 
-CTGTest::init('handler — throws ServerError returns error envelope with correct status')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('handler — throws ServerError returns error envelope with correct status')
+    ->stage('execute', function(CTGTestState $state) {
         $ep = makeEndpoint();
         $ep->GET(function(CTGRequest $req) {
             throw CTGServerError::notFound('User not found');
@@ -629,14 +631,14 @@ CTGTest::init('handler — throws ServerError returns error envelope with correc
         $ep->withRequest('GET');
         return runAndCapture($ep);
     })
-    ->assert('status is 404', fn($r) => $r['status'], 404)
-    ->assert('success is false', fn($r) => $r['json']['success'] ?? null, false)
-    ->assert('type is NOT_FOUND', fn($r) => $r['json']['result']['type'] ?? null, 'NOT_FOUND')
-    ->assert('message present', fn($r) => $r['json']['result']['message'] ?? null, 'User not found')
-    ->start(null, $config);
+    ->assert('status is 404', fn(CTGTestState $state) => $state->getSubject()['status'], CTGTestPredicates::equals(404))
+    ->assert('success is false', fn(CTGTestState $state) => $state->getSubject()['json']['success'] ?? null, CTGTestPredicates::isFalse())
+    ->assert('type is NOT_FOUND', fn(CTGTestState $state) => $state->getSubject()['json']['result']['type'] ?? null, CTGTestPredicates::equals('NOT_FOUND'))
+    ->assert('message present', fn(CTGTestState $state) => $state->getSubject()['json']['result']['message'] ?? null, CTGTestPredicates::equals('User not found'))
+    ;
 
-CTGTest::init('handler — throws generic Exception returns 500, original message not exposed')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('handler — throws generic Exception returns 500, original message not exposed')
+    ->stage('execute', function(CTGTestState $state) {
         $ep = makeEndpoint();
         $ep->GET(function(CTGRequest $req) {
             throw new \RuntimeException('secret database error details');
@@ -644,18 +646,18 @@ CTGTest::init('handler — throws generic Exception returns 500, original messag
         $ep->withRequest('GET');
         return runAndCapture($ep);
     })
-    ->assert('status is 500', fn($r) => $r['status'], 500)
-    ->assert('success is false', fn($r) => $r['json']['success'] ?? null, false)
-    ->assert('type is INTERNAL_ERROR', fn($r) => $r['json']['result']['type'] ?? null, 'INTERNAL_ERROR')
-    ->assert('original message not exposed', fn($r) => str_contains($r['json']['result']['message'] ?? '', 'secret'), false)
-    ->start(null, $config);
+    ->assert('status is 500', fn(CTGTestState $state) => $state->getSubject()['status'], CTGTestPredicates::equals(500))
+    ->assert('success is false', fn(CTGTestState $state) => $state->getSubject()['json']['success'] ?? null, CTGTestPredicates::isFalse())
+    ->assert('type is INTERNAL_ERROR', fn(CTGTestState $state) => $state->getSubject()['json']['result']['type'] ?? null, CTGTestPredicates::equals('INTERNAL_ERROR'))
+    ->assert('original message not exposed', fn(CTGTestState $state) => str_contains($state->getSubject()['json']['result']['message'] ?? '', 'secret'), CTGTestPredicates::isFalse())
+    ;
 
 // ═══════════════════════════════════════════════════════════════
 // COMBINED LIFECYCLE
 // ═══════════════════════════════════════════════════════════════
 
-CTGTest::init('full flow — CORS + auth + validation + handler returns data with CORS headers')
-    ->stage('execute', function($_) {
+$pipelines[] = CTGTest::init('full flow — CORS + auth + validation + handler returns data with CORS headers')
+    ->stage('execute', function(CTGTestState $state) {
         $ep = TestEndpoint::init([
             'cors' => CTGCorsPolicy::init()
                 ->origins(['https://app.example.com'])
@@ -690,11 +692,13 @@ CTGTest::init('full flow — CORS + auth + validation + handler returns data wit
         );
         return runAndCapture($ep);
     })
-    ->assert('status is 201', fn($r) => $r['status'], 201)
-    ->assert('success is true', fn($r) => $r['json']['success'] ?? null, true)
-    ->assert('name in result', fn($r) => $r['json']['result']['name'] ?? null, 'Alice')
-    ->assert('email in result', fn($r) => $r['json']['result']['email'] ?? null, 'alice@example.com')
-    ->assert('created_by from claims', fn($r) => $r['json']['result']['created_by'] ?? null, '42')
-    ->assert('CORS origin header', fn($r) => $r['headers']['Access-Control-Allow-Origin'] ?? null, 'https://app.example.com')
-    ->assert('Vary header', fn($r) => $r['headers']['Vary'] ?? null, 'Origin')
-    ->start(null, $config);
+    ->assert('status is 201', fn(CTGTestState $state) => $state->getSubject()['status'], CTGTestPredicates::equals(201))
+    ->assert('success is true', fn(CTGTestState $state) => $state->getSubject()['json']['success'] ?? null, CTGTestPredicates::isTrue())
+    ->assert('name in result', fn(CTGTestState $state) => $state->getSubject()['json']['result']['name'] ?? null, CTGTestPredicates::equals('Alice'))
+    ->assert('email in result', fn(CTGTestState $state) => $state->getSubject()['json']['result']['email'] ?? null, CTGTestPredicates::equals('alice@example.com'))
+    ->assert('created_by from claims', fn(CTGTestState $state) => $state->getSubject()['json']['result']['created_by'] ?? null, CTGTestPredicates::equals('42'))
+    ->assert('CORS origin header', fn(CTGTestState $state) => $state->getSubject()['headers']['Access-Control-Allow-Origin'] ?? null, CTGTestPredicates::equals('https://app.example.com'))
+    ->assert('Vary header', fn(CTGTestState $state) => $state->getSubject()['headers']['Vary'] ?? null, CTGTestPredicates::equals('Origin'))
+    ;
+
+return $pipelines;
